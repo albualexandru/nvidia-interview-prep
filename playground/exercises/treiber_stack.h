@@ -1,6 +1,6 @@
 #pragma once
 
-#include <memory>
+#include <atomic>
 #include <optional>
 #include <stdexcept>
 
@@ -24,8 +24,10 @@ class TreiberStack {
  private:
   struct Node {
     T value;
-    std::unique_ptr<Node> next;
+    Node* next{nullptr};
   };
+
+  std::atomic<Node*> head_{nullptr};
 };
 
 }  // namespace interview_playground::exercises

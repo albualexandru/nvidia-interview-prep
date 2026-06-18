@@ -45,7 +45,9 @@ class FixedPool {
       }
 
       in_use_[index] = true;
-      auto* instance = ::new (&storage_[index]) T(std::forward<Args>(args)...);
+      auto* instance =
+          ::new (static_cast<void*>(storage_[index].storage.data()))
+              T(std::forward<Args>(args)...);
       return std::unique_ptr<T, Deleter>(instance, Deleter{this});
     }
 
@@ -65,13 +67,24 @@ class FixedPool {
   }
 
  private:
-  using Slot = std::aligned_storage_t<sizeof(T), alignof(T)>;
+  struct alignas(T) Slot {
+    std::array<std::byte, sizeof(T)> storage{};
+  };
 
   void release(T* pointer) noexcept {
-    const auto* slot_pointer = reinterpret_cast<const Slot*>(pointer);
-    const auto index = static_cast<std::size_t>(slot_pointer - storage_.data());
-    pointer->~T();
-    in_use_[index] = false;
+    for (std::size_t index = 0; index < Capacity; ++index) {
+      if (slot_ptr(index) != pointer) {
+        continue;
+      }
+
+      pointer->~T();
+      in_use_[index] = false;
+      return;
+    }
+  }
+
+  [[nodiscard]] auto slot_ptr(std::size_t index) noexcept -> T* {
+    return std::launder(reinterpret_cast<T*>(storage_[index].storage.data()));
   }
 
   std::array<Slot, Capacity> storage_{};

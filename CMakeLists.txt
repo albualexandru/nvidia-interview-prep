@@ -44,6 +44,22 @@ set_target_properties(nix_playground PROPERTIES
   RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/python"
 )
 
+# Exercise: zero-copy buffer protocol (py::buffer_protocol, py::array_t)
+# Complete the TODOs in playground/python/zero_copy_buffer.cpp before building.
+pybind11_add_module(zero_copy_buffer MODULE playground/python/zero_copy_buffer.cpp)
+set_target_properties(zero_copy_buffer PROPERTIES
+  LIBRARY_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/python"
+  RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/python"
+)
+
+# Exercise: NIXL-style IOV descriptor list (scatter-gather, memcpy from numpy)
+# Complete the TODOs in playground/python/iov_descriptor.cpp before building.
+pybind11_add_module(iov_descriptor MODULE playground/python/iov_descriptor.cpp)
+set_target_properties(iov_descriptor PROPERTIES
+  LIBRARY_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/python"
+  RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/python"
+)
+
 if(BUILD_TESTING)
   add_test(NAME core_smoke COMMAND nix_interview_core --self-test)
   add_test(

@@ -43,7 +43,7 @@ class FixedPool {
       bool expected = false;
       if (!in_use_[index].compare_exchange_strong(
               expected, true, std::memory_order_acq_rel,
-              std::memory_order_relaxed)) {
+              std::memory_order_acquire)) {
         continue;
       }
 

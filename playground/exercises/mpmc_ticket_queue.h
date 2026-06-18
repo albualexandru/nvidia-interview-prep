@@ -24,7 +24,7 @@ class MpmcTicketQueue {
   }
 
  private:
-  struct Slot {
+  struct alignas(64) Slot {
     std::atomic<std::size_t> sequence{0};
     std::optional<T> value;
   };

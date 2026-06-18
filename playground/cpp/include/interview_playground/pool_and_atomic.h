@@ -40,15 +40,22 @@ class FixedPool {
   template <typename... Args>
   [[nodiscard]] auto make_unique(Args&&... args) -> std::unique_ptr<T, Deleter> {
     for (std::size_t index = 0; index < Capacity; ++index) {
-      if (in_use_[index]) {
+      bool expected = false;
+      if (!in_use_[index].compare_exchange_strong(
+              expected, true, std::memory_order_acq_rel,
+              std::memory_order_relaxed)) {
         continue;
       }
 
-      in_use_[index] = true;
-      auto* instance =
-          ::new (static_cast<void*>(storage_[index].storage.data()))
-              T(std::forward<Args>(args)...);
-      return std::unique_ptr<T, Deleter>(instance, Deleter{this});
+      try {
+        auto* instance =
+            ::new (static_cast<void*>(storage_[index].storage.data()))
+                T(std::forward<Args>(args)...);
+        return std::unique_ptr<T, Deleter>(instance, Deleter{this});
+      } catch (...) {
+        in_use_[index].store(false, std::memory_order_release);
+        throw;
+      }
     }
 
     throw std::runtime_error("fixed pool exhausted");
@@ -56,8 +63,8 @@ class FixedPool {
 
   [[nodiscard]] auto available() const noexcept -> std::size_t {
     std::size_t free_slots = 0;
-    for (bool busy : in_use_) {
-      free_slots += busy ? 0U : 1U;
+    for (const auto& busy : in_use_) {
+      free_slots += busy.load(std::memory_order_acquire) ? 0U : 1U;
     }
     return free_slots;
   }
@@ -78,7 +85,7 @@ class FixedPool {
       }
 
       pointer->~T();
-      in_use_[index] = false;
+      in_use_[index].store(false, std::memory_order_release);
       return;
     }
   }
@@ -88,7 +95,7 @@ class FixedPool {
   }
 
   std::array<Slot, Capacity> storage_{};
-  std::array<bool, Capacity> in_use_{};
+  std::array<std::atomic_bool, Capacity> in_use_{};
 };
 
 inline auto run_atomic_counter_demo(std::size_t thread_count,

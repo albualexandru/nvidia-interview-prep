@@ -13,6 +13,9 @@ def load_module(module_dir: str):
 
 
 def main() -> int:
+    thread_count = 4
+    increments_per_thread = 2500
+
     parser = argparse.ArgumentParser(description="Run the pybind11 playground demo.")
     parser.add_argument("--module-dir", required=True, help="Directory containing nix_playground.")
     parser.add_argument("--chunks", type=int, default=6)
@@ -21,11 +24,12 @@ def main() -> int:
 
     nix_playground = load_module(args.module_dir)
     transfer = nix_playground.simulate_transfer(args.chunks, args.delay_ms)
-    total = nix_playground.parallel_increment(4, 2500)
+    total = nix_playground.parallel_increment(thread_count, increments_per_thread)
+    expected_total = thread_count * increments_per_thread
 
     print("simulate_transfer:", dict(transfer))
     print("parallel_increment:", total)
-    return 0 if total == 10_000 else 1
+    return 0 if total == expected_total else 1
 
 
 if __name__ == "__main__":

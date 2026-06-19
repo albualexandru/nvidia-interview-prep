@@ -58,17 +58,41 @@
 
 namespace interview_playground::exercises {
 
+/** 
+producer:  slots_[head] = value          ← write the data
+           head_.store(release)          ← publish it
+
+consumer:  head_.load(acquire)           ← MUST be acquire to see the data
+           read slots_[tail]
+
+*/
+
 template <typename T, std::size_t Capacity>
 class SpscRingBuffer {
  public:
   // Returns false if the buffer is full (non-blocking).
   auto push(T value) -> bool {
-    throw std::logic_error("TODO: implement SpscRingBuffer::push");
+    auto head = head_.load(std::memory_order_relaxed);
+    auto tail = tail_.load(std::memory_order_acquire);
+    if((head + 1) % Capacity == tail) {
+      return false;
+    }
+    slots_[head] = std::move(value);
+    head_.store((head + 1) % Capacity, std::memory_order_release);
+    return true;
+
   }
 
   // Returns nullopt if the buffer is empty (non-blocking).
   auto pop() -> std::optional<T> {
-    throw std::logic_error("TODO: implement SpscRingBuffer::pop");
+    auto head = head_.load(std::memory_order_acquire);
+    auto tail = tail_.load(std::memory_order_relaxed);
+    if (head == tail) {
+      return std::nullopt;
+    }
+    auto value = std::move(slots_[tail]);
+    tail_.store((tail + 1) % Capacity, std::memory_order_release);
+    return value;
   }
 
  private:

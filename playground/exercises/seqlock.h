@@ -104,21 +104,33 @@ class SeqLock {
   // write — update the payload.  Called by at most one writer at a time.
   // (If multiple writers are possible, protect this with a mutex externally.)
   void write(const T& value) {
-    throw std::logic_error(
-        "TODO: implement SeqLock::write — "
-        "fetch_add(1, release) [odd], memcpy payload, fetch_add(1, release) [even]. "
-        "Add a std::atomic_thread_fence(seq_cst) before the second fetch_add "
-        "on weakly-ordered architectures.");
-  }
+// 1. Claim the lock (odd sequence)
+    seq_.fetch_add(1, std::memory_order_release);
+    
+    // 3. Update the payload
+    payload_ = value;
+
+    // memory_order_release ensures payload writes finish BEFORE sequence becomes even.
+    seq_.fetch_add(1, std::memory_order_release);
+}
 
   // read — return a consistent snapshot of the payload.
   // May spin if a write is in progress; otherwise returns immediately.
   [[nodiscard]] auto read() const -> T {
-    throw std::logic_error(
-        "TODO: implement SeqLock::read — "
-        "load seq_ (acquire), check odd (spin if so), "
-        "memcpy payload to local, load seq_ again (acquire), "
-        "if changed retry, else return local copy.");
+    T snapshot;
+    std::size_t s1 = 0;
+    std::size_t s2 = 0;
+     do {
+        s1 = seq_.load(std::memory_order_acquire);
+        if (s1 % 2 == 1) {
+            continue;  // writer is mid-update; retry
+        }
+        snapshot = payload_;
+
+        s2 = seq_.load(std::memory_order_acquire);
+
+     } while(s1 != s2);
+    return snapshot;
   }
 
  private:

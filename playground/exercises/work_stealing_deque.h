@@ -104,28 +104,80 @@ class WorkStealingDeque {
  public:
   // Push a task onto the bottom of the deque.  Called by the owner thread only.
   void push_bottom(T task) {
-    throw std::logic_error(
-        "TODO: implement WorkStealingDeque::push_bottom — "
-        "load bottom_ (relaxed), write buf_, release fence, store bottom_+1 (relaxed).");
+    auto b = bottom_.load(std::memory_order_relaxed);
+    auto t = top_.load(std::memory_order_acquire);
+
+    if (b - t >= Capacity) {
+      throw std::runtime_error("deque overflow");
+    }
+
+
+    buf_[b%Capacity] = std::move(task);
+    bottom_.store(b + 1, std::memory_order_release);
+        
   }
 
   // Pop a task from the bottom.  Called by the owner thread only.
   // Returns nullopt if the deque is empty.
   [[nodiscard]] auto pop_bottom() -> std::optional<T> {
-    throw std::logic_error(
-        "TODO: implement WorkStealingDeque::pop_bottom — "
-        "decrement bottom_ (seq_cst), compare with top_, "
-        "CAS top_ if only one item remains.");
+// 1. Claim the index (relaxed is fine here because the fence does the heavy lifting)
+    auto b = bottom_.load(std::memory_order_relaxed) - 1;
+    bottom_.store(b, std::memory_order_relaxed);
+
+    // 2. THE SHIELD: Forbid the CPU from moving the top_ load above the bottom_ store
+    std::atomic_thread_fence(std::memory_order_seq_cst);
+
+    // 3. Look at the thief's progress
+    auto t = top_.load(std::memory_order_relaxed);
+
+    // If b > t it means that there is plenty of data
+    if (b > t) {
+        return buf_[b%Capacity];
+    }
+
+    // It means that there were no tasks for me to take it so I need to revert
+    // I was just too slow
+    if (b < t) {
+        bottom_.store(t, std::memory_order_relaxed);
+        return std::nullopt;
+    }
+
+    // It means that there is just one element
+    // if (b == t) {
+        if (!top_.compare_exchange_strong(t, t + 1, std::memory_order_seq_cst, std::memory_order_relaxed)) {
+            // It means that I was too slow and this was already taken
+            // so I need to revert my bottom_ and return nullopt
+            bottom_.store(t + 1, std::memory_order_relaxed);
+            return std::nullopt;
+        }
+        // I took it.
+        // I bump this because in the attempt to check if I am the owner
+        // I bumpted top to t+1 but bottom (b) was t so now bottom is smaller
+        // then top, so I need to bump it.
+        bottom_.store(t + 1, std::memory_order_relaxed);
+        return buf_[b%Capacity];
+    // }
   }
 
   // Steal a task from the top.  Called by thief threads.
   // Returns nullopt if the deque is empty or another thief won the race.
   // Callers should retry on nullopt if they believe the deque is non-empty.
   [[nodiscard]] auto steal_top() -> std::optional<T> {
-    throw std::logic_error(
-        "TODO: implement WorkStealingDeque::steal_top — "
-        "load top_ (acquire), seq_cst fence, load bottom_ (acquire), "
-        "read buf_, CAS top_ (seq_cst/relaxed).");
+    auto t = top_.load(std::memory_order_acquire);
+    std::atomic_thread_fence(std::memory_order_seq_cst);
+    auto b = bottom_.load(std::memory_order_acquire);
+    
+    if (t >= b) {
+        return std::nullopt;
+    }
+
+    auto task = buf_[t%Capacity]; // Read safely while the slot is still mathematically "yours"
+
+    if (!top_.compare_exchange_strong(t, t + 1, std::memory_order_seq_cst, std::memory_order_relaxed)) {
+        return std::nullopt;
+    }
+
+    return task
   }
 
   // Returns a snapshot of the approximate number of items.

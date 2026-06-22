@@ -86,14 +86,69 @@ class MpmcTicketQueue {
     }
   }
 
-  // Returns false if the queue is full (non-blocking).
+  // Returns false if the queue is full or another attempt at getting a slot should be made (non-blocking).
   auto enqueue(T value) -> bool {
-    throw std::logic_error("TODO: implement MpmcTicketQueue::enqueue");
+    auto t = tail.load(std::memory_order_relaxed);
+    
+    for (;;) {
+      auto seq = slots_[t % Capacity].sequence.load(std::memory_order_acquire);
+      intptr_t diff = static_cast<intptr_t>(seq) - static_cast<intptr_t>(t);
+
+      if (diff == 0) {
+        // Slot is empty and matches our ticket. Try to claim it.
+        if (tail.compare_exchange_weak(t, t + 1, std::memory_order_relaxed)) {
+          break; // Success! We own ticket 't'. Break the loop.
+        }
+        // If CAS fails, 't' is updated. Loop restarts to check the new 't'.
+      } 
+      else if (diff < 0) {
+        // The sequence is behind our ticket. The queue is full.
+        return false; 
+      } 
+      else {
+        // diff > 0. We are out of sync (another thread just updated the sequence).
+        // Reload tail and try again.
+        t = tail.load(std::memory_order_relaxed);
+      }
+    }
+
+    // We only reach here if we successfully claimed ticket 't'
+    slots_[t % Capacity].value = std::move(value);
+    slots_[t % Capacity].sequence.store(t + 1, std::memory_order_release);
+
+    return true;
   }
 
   // Returns nullopt if the queue is empty (non-blocking).
   auto dequeue() -> std::optional<T> {
-    throw std::logic_error("TODO: implement MpmcTicketQueue::dequeue");
+    auto h = head.load(std::memory_order_relaxed);
+
+    while (true) {
+      auto seq = slots_[h % Capacity].sequence.load(std::memory_order_acquire);
+      intptr_t diff = static_cast<intptr_t>(seq) - static_cast<intptr_t>(h+1);
+
+      if (diff == 0) {
+        // Slot is full and matches our ticket. Try to claim it.
+        if (head.compare_exchange_weak(h, h + 1, std::memory_order_relaxed)) {
+          break; // Success! We own ticket 'h'. Break the loop.
+        }
+      } else if (diff < 0) {
+        // The sequence is behind our ticket. The queue is empty.
+        return std::nullopt; 
+      } else {
+        // diff > 0. We are out of sync (another thread just updated the sequence).
+        // Reload head and try again.
+        h = head.load(std::memory_order_relaxed);
+        continue;
+      }
+
+    }
+
+    // We only reach here if we successfully claimed ticket 'h'
+    auto value = std::move(slots_[h % Capacity].value);
+    slots_[h % Capacity].sequence.store(h + Capacity, std::memory_order_release);
+    
+    return value;
   }
 
  private:
